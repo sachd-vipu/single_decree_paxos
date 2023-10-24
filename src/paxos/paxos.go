@@ -298,7 +298,18 @@ func Make(peers []string, me int, rpcs *rpc.Server) *Paxos {
 
 
 	// Your initialization code here.
-
+	// Map of instances
+	px.instances = make(map[int]*Instance)
+	px.maximumSeqNo = 0
+	px.minimumSeqNo = make([]int, len(peers))
+	
+	// set min seq no to 01 for all proposers
+	i := 0
+	for i < len(px.minimumSeqNo) {
+		px.minimumSeqNo[i] = -1
+		i++
+	}
+	
 	if rpcs != nil {
 		// caller will create socket &c
 		rpcs.Register(px)
