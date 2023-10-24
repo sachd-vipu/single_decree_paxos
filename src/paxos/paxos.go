@@ -142,7 +142,7 @@ func (px *Paxos) Done(seq int) {
 //
 func (px *Paxos) Max() int {
 
-	return px.max_seq
+	return px.maximumSeqNo
 }
 
 //
@@ -174,8 +174,17 @@ func (px *Paxos) Max() int {
 // instances.
 //
 func (px *Paxos) Min() int {
-	// You code here.
-	return 0
+	// let min be some maximum value so it can be compared to the minimum of all the minseq
+	min := math.MaxInt32
+	i := 0
+	// Check minimumSeqNo for all proposers
+	for i < len(px.minimumSeqNo) {
+		if min > px.minimumSeqNo[i] {
+			min = px.minimumSeqNo[i]
+		}
+		i++
+	}
+	return min + 1
 }
 
 //
