@@ -146,7 +146,7 @@ func (px *Paxos) Start(seq int, v interface{}) {
 
 
 // perpare will be called in Propose function
-func (px *Paxos) Prepare(seq int, proposalNum int64, response PrepareResp) (int64, int64) {
+func (px *Paxos) Prepare(seq int, proposalNum int64, response PrepareResp) {
 	
 		// GetNodeInfo will return the instance from seq number
 		pxInstance := px.GetNodeInfo(seq)
