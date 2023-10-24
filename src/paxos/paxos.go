@@ -47,7 +47,7 @@ const (
 
 type Instance struct {
 	fate           Fate
-	value          interface{}
+	acceptedValue          interface{}
 	highestAccept  int64
 	highestPrepare int64
 }
@@ -69,11 +69,12 @@ type Paxos struct {
 	concurrencyMutex sync.Mutex
 	maximumSeqNo     int
 	minimumSeqNo     []int
+	
 }
 
 func (ins *Instance) setInstance() {
 	ins.fate = Pending
-	ins.value = nil
+	ins.acceptedValue = nil
 	ins.highestAccept = 0
 	ins.highestPrepare = 0
 }
@@ -212,6 +213,13 @@ func (px *Paxos) Status(seq int) (Fate, interface{}) {
 	// if seq is less than min, return forgotten
 	if seq < px.Min() {
 		return Forgotten, nil
+	}
+	
+	pxInstance, instanceExists := px.instances[seq]
+	if !instanceExists {
+		return 0, nil
+	} else {
+		return px.instances[seq].fate, pxInstance.acceptedValue
 	}
 	
 	return Pending, nil
