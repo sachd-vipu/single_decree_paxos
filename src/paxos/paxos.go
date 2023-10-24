@@ -30,6 +30,7 @@ import "sync"
 import "sync/atomic"
 import "fmt"
 import "math/rand"
+import "math"
 
 
 // px.Status() return values, indicating
@@ -123,6 +124,16 @@ func call(srv string, name string, args interface{}, reply interface{}) bool {
 //
 func (px *Paxos) Start(seq int, v interface{}) {
 	// Your code here.
+	if px.maximumSeqNo < seq {
+		px.maximumSeqNo = seq
+	} else if px.minimumSeqNo[px.me] < seq {
+		log.Fatal("no instances")
+		return
+	}
+	go func() {
+		// to be implemented by Ayush
+		px.Propose(seq, v)
+	}()
 }
 
 //
