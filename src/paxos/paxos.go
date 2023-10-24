@@ -326,11 +326,11 @@ func (px *Paxos) getNodeInfo(seqNo int) *Instance {
 	return px.instances[seqNo]
 }
 
-// perpare will be called in Propose function
+// Prepare will be called in Propose function
 func (px *Paxos) Prepare(seq int, proposalNum int64, prepReply *Reply) {
 	
 		// GetNodeInfo will return the instance from seq number
-		pxInstance := px.GetNodeInfo(seq)
+		pxInstance := px.getNodeInfo(seq)
 		if pxInstance != nil && proposalNum > pxInstance.highestPrepare {
 			pxInstance.highestPrepare = proposalNum
 			prepReply.Valid = 1
@@ -347,7 +347,7 @@ func (px *Paxos) Prepare(seq int, proposalNum int64, prepReply *Reply) {
 
 func (px *Paxos) Accept(seq int, proposalNum int64, acceptReply *Reply) {
 
-	pxInstance := px.GetNodeInfo(seq)
+	pxInstance := px.getNodeInfo(seq)
 	if pxInstance != nil && proposalNum >= pxInstance.highestPrepare {
 		pxInstance.highestPrepare = proposalNum
 		pxInstance.acceptedValue = args.Value
