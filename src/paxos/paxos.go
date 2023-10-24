@@ -69,8 +69,14 @@ type Paxos struct {
 	concurrencyMutex sync.Mutex
 	maximumSeqNo     int
 	minimumSeqNo     []int
-	
+
 }
+
+type PrepareResp struct {
+	Valid int
+	ProposalNum int64
+	Value interface{}
+  }
 
 func (ins *Instance) setInstance() {
 	ins.fate = Pending
@@ -136,6 +142,27 @@ func (px *Paxos) Start(seq int, v interface{}) {
 		px.Propose(seq, v)
 	}()
 }
+
+
+
+// perpare will be called in Propose function
+func (px *Paxos) Prepare(seq int, proposalNum int64, response PrepareResp) (int64, int64) {
+	
+		// GetNodeInfo will return the instance from seq number
+		pxInstance := px.GetNodeInfo(seq)
+		if pxInstance != nil && proposalNum > pxInstance.highestPrepare {
+			px.highestPrepare = proposalNum
+			response.Valid = 1
+			response.ProposalNum = pxInstance.highestAccept
+			response.Value = pxInstance.acceptedValue
+		} 
+		else {
+			response.Valid = 0
+		}
+		return nil
+}
+	
+
 
 //
 // the application on this machine is done with
