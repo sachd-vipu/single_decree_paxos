@@ -72,7 +72,7 @@ type Paxos struct {
 
 }
 
-type PrepareResp struct {
+type Reply struct {
 	Valid int
 	ProposalNum int64
 	Value interface{}
@@ -146,23 +146,39 @@ func (px *Paxos) Start(seq int, v interface{}) {
 
 
 // perpare will be called in Propose function
-func (px *Paxos) Prepare(seq int, proposalNum int64, response PrepareResp) {
+func (px *Paxos) Prepare(seq int, proposalNum int64, prepReply *Reply) {
 	
 		// GetNodeInfo will return the instance from seq number
 		pxInstance := px.GetNodeInfo(seq)
 		if pxInstance != nil && proposalNum > pxInstance.highestPrepare {
-			px.highestPrepare = proposalNum
-			response.Valid = 1
-			response.ProposalNum = pxInstance.highestAccept
-			response.Value = pxInstance.acceptedValue
+			pxInstance.highestPrepare = proposalNum
+			prepReply.Valid = 1
+			prepReply.ProposalNum = pxInstance.highestAccept
+			prepReply.Value = pxInstance.acceptedValue
 		} 
 		else {
-			response.Valid = 0
+			prepReply.Valid = 0
 		}
-		return nil
-}
+		return
+	}
 	
 
+
+func (px *Paxos) Accept(seq int, proposalNum int64, acceptReply *Reply) {
+
+	pxInstance := px.GetNodeInfo(seq)
+	if pxInstance != nil && proposalNum >= pxInstance.highestPrepare {
+		pxInstance.highestPrepare = proposalNum
+		pxInstance.acceptedValue = args.Value
+		pxInstance.highestAccept = proposalNum
+		acceptReply.Valid = 1
+		acceptReply.proposalNum = proposalNum
+	} else {
+		acceptReply.Valid = 0
+		acceptReply.ProposalNum = proposalNum
+	}
+	return 
+}
 
 //
 // the application on this machine is done with
@@ -171,7 +187,10 @@ func (px *Paxos) Prepare(seq int, proposalNum int64, response PrepareResp) {
 // see the comments for Min() for more explanation.
 //
 func (px *Paxos) Done(seq int) {
-	// Your code here.
+	// Set min seq no for proposer to seq
+	// this value will be used later in Min() function
+	px.minimumSeqNo[px.me] = seq
+
 }
 
 //
