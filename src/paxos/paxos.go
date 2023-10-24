@@ -44,13 +44,11 @@ const (
 	Forgotten      // decided but forgotten.
 )
 
-type PxMachine struct {
-	Accepted bool
-	Decided bool
-	Val_Accepted interface{}
-	//Val_Decided interface{}
-	Mx_Proposed_Num int
-	Mx_Accepted_Num int
+type Instance struct {
+	fate           Fate
+	value          interface{}
+	highestAccept  int64
+	highestPrepare int64
 }
 
 type Paxos struct {
@@ -64,10 +62,19 @@ type Paxos struct {
 
 
 	// Your data here.
-	instance map[int]*PxMachine
-	majority int
-	min_seq int
-	max_seq int
+	name             string
+	isPersistent     bool
+	instances        map[int]*Instance
+	concurrencyMutex sync.Mutex
+	maximumSeqNo     int
+	minimumSeqNo     []int
+}
+
+func (ins *Instance) setInstance() {
+	ins.fate = Pending
+	ins.value = nil
+	ins.highestAccept = 0
+	ins.highestPrepare = 0
 }
 
 //
