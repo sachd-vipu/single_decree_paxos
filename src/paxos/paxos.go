@@ -44,6 +44,15 @@ const (
 	Forgotten      // decided but forgotten.
 )
 
+type PxMachine struct {
+	Accepted bool
+	Decided bool
+	Val_Accepted interface{}
+	//Val_Decided interface{}
+	Mx_Proposed_Num int
+	Mx_Accepted_Num int
+}
+
 type Paxos struct {
 	mu         sync.Mutex
 	l          net.Listener
@@ -55,6 +64,10 @@ type Paxos struct {
 
 
 	// Your data here.
+	instance map[int]*PxMachine
+	majority int
+	min_seq int
+	max_seq int
 }
 
 //
@@ -121,8 +134,8 @@ func (px *Paxos) Done(seq int) {
 // this peer.
 //
 func (px *Paxos) Max() int {
-	// Your code here.
-	return 0
+
+	return px.max_seq
 }
 
 //
@@ -167,6 +180,13 @@ func (px *Paxos) Min() int {
 //
 func (px *Paxos) Status(seq int) (Fate, interface{}) {
 	// Your code here.
+	
+	
+	// if seq is less than min, return forgotten
+	if seq < px.Min() {
+		return Forgotten, nil
+	}
+	
 	return Pending, nil
 }
 
