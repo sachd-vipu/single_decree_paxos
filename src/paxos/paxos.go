@@ -31,7 +31,7 @@ import "sync/atomic"
 import "fmt"
 import "math/rand"
 import "math"
-
+import "time"
 
 // px.Status() return values, indicating
 // whether an agreement has been decided,
@@ -47,10 +47,55 @@ const (
 
 type Instance struct {
 	fate           Fate
-	acceptedValue          interface{}
+	acceptedValue  interface{}
 	highestAccept  int64
 	highestPrepare int64
 }
+
+type prepareArguments struct {
+	seqNo      int
+	proposalNo int64
+}
+
+type prepareReply struct {
+	ok         bool
+	proposalNo int64
+	value      interface{}
+}
+
+type acceptArguments struct {
+	seqNo      int
+	proposalNo int64
+	value      interface{}
+}
+
+type acceptReply struct {
+	ok         bool
+	proposalNo int64
+}
+
+type decidedArguments struct {
+	seqNo         int
+	value         interface{}
+	me            int
+	doneSequences int
+}
+
+type decidedReply struct {
+	ok bool
+}
+
+type pollArguments struct {
+	seqNo int
+}
+
+type pollReply struct {
+	ok    bool
+	value interface{}
+}
+
+const delayBetweenInterval = time.Millisecond * 8
+const maxDelayAllowed = 5
 
 type Paxos struct {
 	mu         sync.Mutex
@@ -60,7 +105,6 @@ type Paxos struct {
 	rpcCount   int32 // for testing
 	peers      []string
 	me         int // index into peers[]
-
 
 	// Your data here.
 	name             string
@@ -85,7 +129,6 @@ func (ins *Instance) setInstance() {
 	ins.highestPrepare = 0
 }
 
-//
 // call() sends an RPC to the rpcname handler on server srv
 // with arguments args, waits for the reply, and leaves the
 // reply in reply. the reply argument should be a pointer
@@ -100,7 +143,6 @@ func (ins *Instance) setInstance() {
 //
 // please use call() to send all RPCs, in client.go and server.go.
 // please do not change this function.
-//
 func call(srv string, name string, args interface{}, reply interface{}) bool {
 	c, err := rpc.Dial("unix", srv)
 	if err != nil {
@@ -121,14 +163,11 @@ func call(srv string, name string, args interface{}, reply interface{}) bool {
 	return false
 }
 
-
-//
 // the application wants paxos to start agreement on
 // instance seq, with proposed value v.
 // Start() returns right away; the application will
 // call Status() to find out if/when agreement
 // is reached.
-//
 func (px *Paxos) Start(seq int, v interface{}) {
 	// Your code here.
 	if px.maximumSeqNo < seq {
@@ -139,11 +178,153 @@ func (px *Paxos) Start(seq int, v interface{}) {
 	}
 	go func() {
 		// to be implemented by Ayush
-		px.Propose(seq, v)
+		px.proposeValue(seq, v)
 	}()
 }
 
+func (px *Paxos) proposeValue(seqNo int, v interface{}) {
+	px.concurrencyMutex.Lock()
+	defer px.concurrencyMutex.Unlock()
 
+	px.mu.Lock()
+	currInstance := px.getNodeInfo(seqNo)
+	px.mu.Unlock()
+
+	if currInstance == nil {
+		return
+	}
+	for px.dead == 0 && currInstance.fate == Pending && seqNo > px.minimumSeqNo[px.me] {
+		proposalNo := time.Now().UnixNano()
+		proposalNo = proposalNo*int64(len(px.peers)) + int64(px.me)
+
+		proposeResponses := make(chan prepareReply)
+		peerId := 0
+		for peerId < len(px.peers) {
+			args := prepareArguments{seqNo, proposalNo}
+			reply := prepareReply{false, -2, nil}
+			go func(peerId int) {
+				if peerId == px.me {
+					px.Prepare(&args, &reply)
+					proposeResponses <- reply
+				} else {
+					ok := call(px.peers[peerId], "Paxos.Prepare", &args, &reply)
+					if ok {
+						proposeResponses <- reply
+					}
+				}
+			}(peerId)
+			peerId++
+		}
+
+		majority := len(px.peers) / 2
+		respNum := 0
+		var maxProposalNo int64
+		maxProposalNo = 0
+		minval := v
+		delayNum := 0
+		done := false
+		for !done {
+			reply := <-proposeResponses
+			if reply.ok {
+				respNum++
+				if reply.proposalNo > maxProposalNo && reply.value != nil {
+					maxProposalNo = reply.proposalNo
+					minval = reply.value
+				}
+				if respNum > majority {
+					done = true
+				}
+			} else {
+				time.Sleep(delayBetweenInterval)
+				delayNum++
+				if delayNum >= maxDelayAllowed {
+					done = true
+				}
+			}
+		}
+		if respNum <= len(px.peers)/2 {
+			ms := rand.Int31() % 1000
+			time.Sleep(time.Duration(ms) * time.Millisecond)
+			continue
+		}
+
+		acceptResponses := make(chan acceptReply)
+		for peerId := 0; peerId < len(px.peers); peerId++ {
+			args := acceptArguments{seqNo, proposalNo, minval}
+			var reply acceptReply
+			go func(peerId int) {
+				if peerId == px.me {
+					// To be implemented by Vipul
+					px.Accept(&args, &reply)
+				} else {
+					call(px.peers[peerId], "Paxos.Accept", &args, &reply)
+				}
+				acceptResponses <- reply
+			}(peerId)
+		}
+		respNum = 0
+		delayNum = 0
+		done = false
+		for done == false {
+			reply := <-acceptResponses
+
+			if reply.ok {
+
+				if reply.proposalNo == proposalNo {
+					respNum++
+					if respNum > len(px.peers)/2 {
+						done = true
+					}
+				}
+			} else {
+
+				time.Sleep(delayBetweenInterval)
+				delayNum++
+				if delayNum >= maxDelayAllowed {
+					done = true
+				}
+			}
+		}
+		majority = len(px.peers) / 2
+		if respNum <= majority {
+			time.Sleep(time.Duration(rand.Int31()%1000) * time.Millisecond)
+			continue
+		}
+		peerId = 0
+		for peerId < len(px.peers) {
+			var reply decidedReply
+			args := decidedArguments{seqNo, minval, px.me, px.minimumSeqNo[px.me]}
+			if peerId == px.me {
+				// to be implemented by Ayush
+				px.Decide(&args, &reply)
+			} else {
+				go func(peerId int) {
+					if peerId == px.me {
+						px.Decide(&args, &reply)
+					} else {
+						call(px.peers[peerId], "Paxos.Decide", &args, &reply)
+					}
+				}(peerId)
+			}
+			peerId++
+		}
+	}
+}
+
+func (px *Paxos) getNodeInfo(seqNo int) *Instance {
+	if seqNo < px.Min() {
+		return nil
+	}
+	_, containsSeqNo := px.instances[seqNo]
+	if containsSeqNo == false {
+		px.instances[seqNo] = new(Instance)
+		if px.instances[seqNo] == nil {
+			log.Fatal("Failure during getNodeInfo")
+		}
+		px.instances[seqNo].setInstance()
+	}
+	return px.instances[seqNo]
+}
 
 // perpare will be called in Propose function
 func (px *Paxos) Prepare(seq int, proposalNum int64, prepReply *Reply) {
@@ -185,7 +366,6 @@ func (px *Paxos) Accept(seq int, proposalNum int64, acceptReply *Reply) {
 // all instances <= seq.
 //
 // see the comments for Min() for more explanation.
-//
 func (px *Paxos) Done(seq int) {
 	// Set min seq no for proposer to seq
 	// this value will be used later in Min() function
@@ -193,17 +373,14 @@ func (px *Paxos) Done(seq int) {
 
 }
 
-//
 // the application wants to know the
 // highest instance sequence known to
 // this peer.
-//
 func (px *Paxos) Max() int {
 
 	return px.maximumSeqNo
 }
 
-//
 // Min() should return one more than the minimum among z_i,
 // where z_i is the highest number ever passed
 // to Done() on peer i. A peers z_i is -1 if it has
@@ -230,7 +407,6 @@ func (px *Paxos) Max() int {
 // life, it will need to catch up on instances that it
 // missed -- the other peers therefor cannot forget these
 // instances.
-//
 func (px *Paxos) Min() int {
 	// let min be some maximum value so it can be compared to the minimum of all the minseq
 	min := math.MaxInt32
@@ -245,39 +421,32 @@ func (px *Paxos) Min() int {
 	return min + 1
 }
 
-//
 // the application wants to know whether this
 // peer thinks an instance has been decided,
 // and if so what the agreed value is. Status()
 // should just inspect the local peer state;
 // it should not contact other Paxos peers.
-//
 func (px *Paxos) Status(seq int) (Fate, interface{}) {
 	// Your code here.
-	
-	
+
 	// if seq is less than min, return forgotten
 	if seq < px.Min() {
 		return Forgotten, nil
 	}
-	
+
 	pxInstance, instanceExists := px.instances[seq]
 	if !instanceExists {
 		return 0, nil
 	} else {
 		return px.instances[seq].fate, pxInstance.acceptedValue
 	}
-	
+
 	return Pending, nil
 }
 
-
-
-//
 // tell the peer to shut itself down.
 // for testing.
 // please do not change these two functions.
-//
 func (px *Paxos) Kill() {
 	atomic.StoreInt32(&px.dead, 1)
 	if px.l != nil {
@@ -285,9 +454,7 @@ func (px *Paxos) Kill() {
 	}
 }
 
-//
 // has this peer been asked to shut down?
-//
 func (px *Paxos) isdead() bool {
 	return atomic.LoadInt32(&px.dead) != 0
 }
@@ -305,30 +472,27 @@ func (px *Paxos) isunreliable() bool {
 	return atomic.LoadInt32(&px.unreliable) != 0
 }
 
-//
 // the application wants to create a paxos peer.
 // the ports of all the paxos peers (including this one)
 // are in peers[]. this servers port is peers[me].
-//
 func Make(peers []string, me int, rpcs *rpc.Server) *Paxos {
 	px := &Paxos{}
 	px.peers = peers
 	px.me = me
-
 
 	// Your initialization code here.
 	// Map of instances
 	px.instances = make(map[int]*Instance)
 	px.maximumSeqNo = 0
 	px.minimumSeqNo = make([]int, len(peers))
-	
+
 	// set min seq no to 01 for all proposers
 	i := 0
 	for i < len(px.minimumSeqNo) {
 		px.minimumSeqNo[i] = -1
 		i++
 	}
-	
+
 	if rpcs != nil {
 		// caller will create socket &c
 		rpcs.Register(px)
@@ -379,7 +543,6 @@ func Make(peers []string, me int, rpcs *rpc.Server) *Paxos {
 			}
 		}()
 	}
-
 
 	return px
 }
