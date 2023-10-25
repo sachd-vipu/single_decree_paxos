@@ -327,36 +327,32 @@ func (px *Paxos) getNodeInfo(seqNo int) *Instance {
 }
 
 // Prepare will be called in Propose function
-func (px *Paxos) Prepare(seq int, proposalNum int64, prepReply *Reply) {
-	
-		// GetNodeInfo will return the instance from seq number
-		pxInstance := px.getNodeInfo(seq)
-		if pxInstance != nil && proposalNum > pxInstance.highestPrepare {
-			pxInstance.highestPrepare = proposalNum
-			prepReply.Valid = 1
-			prepReply.ProposalNum = pxInstance.highestAccept
-			prepReply.Value = pxInstance.acceptedValue
-		} 
-		else {
-			prepReply.Valid = 0
-		}
-		return
-	}
-	
-
-
-func (px *Paxos) Accept(seq int, proposalNum int64, acceptReply *Reply) {
-
-	pxInstance := px.getNodeInfo(seq)
-	if pxInstance != nil && proposalNum >= pxInstance.highestPrepare {
-		pxInstance.highestPrepare = proposalNum
-		pxInstance.acceptedValue = args.Value
-		pxInstance.highestAccept = proposalNum
-		acceptReply.Valid = 1
-		acceptReply.proposalNum = proposalNum
+func (px *Paxos) Prepare(args *prepareArguments, response *prepareReply) error {
+	// GetNodeInfo will return the instance from seq number
+	pxInstance := px.getNodeInfo(args.seqNo)
+	if pxInstance != nil && args.proposalNo > pxInstance.highestPrepare {
+		pxInstance.highestPrepare = args.proposalNo
+		response.ok = true
+		response.proposalNo = pxInstance.highestAccept
+		response.value = pxInstance.acceptedValue
 	} else {
-		acceptReply.Valid = 0
-		acceptReply.ProposalNum = proposalNum
+		response.ok = false
+	}
+	return nil	
+	
+
+func (px *Paxos) Accept(args *acceptArguments, acceptReply *acceptReply) {
+
+	pxInstance := px.getNodeInfo(args.seqNo)
+	if pxInstance != nil && args.proposalNo >= pxInstance.highestPrepare {
+		pxInstance.highestPrepare = args.proposalNo
+		pxInstance.acceptedValue = args.value
+		pxInstance.highestAccept = args.proposalNo
+		acceptReply.ok = true
+		acceptReply.proposalNo = args.proposalNum
+	} else {
+		acceptReply.ok = false
+		acceptReply.proposalNo = args.proposalNo
 	}
 	return 
 }
