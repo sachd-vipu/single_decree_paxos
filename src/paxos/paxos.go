@@ -47,50 +47,50 @@ const (
 
 type Instance struct {
 	fate           Fate
-	acceptedValue  interface{}
-	highestAccept  int64
-	highestPrepare int64
+	AcceptedValue  interface{}
+	HighestAccept  int64
+	HighestPrepare int64
 }
 
 type prepareArguments struct {
-	seqNo      int
-	proposalNo int64
+	SeqNo      int
+	ProposalNo int64
 }
 
 type prepareReply struct {
-	ok         bool
-	proposalNo int64
-	value      interface{}
+	Ok         bool
+	ProposalNo int64
+	Value      interface{}
 }
 
 type acceptArguments struct {
-	seqNo      int
-	proposalNo int64
-	value      interface{}
+	SeqNo      int
+	ProposalNo int64
+	Value      interface{}
 }
 
 type acceptReply struct {
-	ok         bool
-	proposalNo int64
+	Ok         bool
+	ProposalNo int64
 }
 
 type decidedArguments struct {
-	seqNo         int
-	value         interface{}
-	me            int
-	doneSequences int
+	SeqNo         int
+	Value         interface{}
+	Me            int
+	DoneSequences int
 }
 
 type decidedReply struct {
-	ok bool
+	Ok bool
 }
 
 type pollArguments struct {
-	seqNo int
+	SeqNo int
 }
 
 type pollReply struct {
-	ok    bool
+	Ok    bool
 	value interface{}
 }
 
@@ -113,20 +113,13 @@ type Paxos struct {
 	concurrencyMutex sync.Mutex
 	maximumSeqNo     int
 	minimumSeqNo     []int
-
 }
-
-type Reply struct {
-	Valid int
-	ProposalNum int64
-	Value interface{}
-  }
 
 func (ins *Instance) setInstance() {
 	ins.fate = Pending
-	ins.acceptedValue = nil
-	ins.highestAccept = 0
-	ins.highestPrepare = 0
+	ins.AcceptedValue = nil
+	ins.HighestAccept = 0
+	ins.HighestPrepare = 0
 }
 
 // call() sends an RPC to the rpcname handler on server srv
@@ -172,7 +165,7 @@ func (px *Paxos) Start(seq int, v interface{}) {
 	// Your code here.
 	if px.maximumSeqNo < seq {
 		px.maximumSeqNo = seq
-	} else if px.minimumSeqNo[px.me] < seq {
+	} else if px.minimumSeqNo[px.me] > seq {
 		log.Fatal("no instances")
 		return
 	}
@@ -225,11 +218,11 @@ func (px *Paxos) proposeValue(seqNo int, v interface{}) {
 		done := false
 		for !done {
 			reply := <-proposeResponses
-			if reply.ok {
+			if reply.Ok {
 				respNum++
-				if reply.proposalNo > maxProposalNo && reply.value != nil {
-					maxProposalNo = reply.proposalNo
-					minval = reply.value
+				if reply.ProposalNo > maxProposalNo && reply.Value != nil {
+					maxProposalNo = reply.ProposalNo
+					minval = reply.Value
 				}
 				if respNum > majority {
 					done = true
@@ -268,9 +261,9 @@ func (px *Paxos) proposeValue(seqNo int, v interface{}) {
 		for done == false {
 			reply := <-acceptResponses
 
-			if reply.ok {
+			if reply.Ok {
 
-				if reply.proposalNo == proposalNo {
+				if reply.ProposalNo == proposalNo {
 					respNum++
 					if respNum > len(px.peers)/2 {
 						done = true
@@ -329,35 +322,34 @@ func (px *Paxos) getNodeInfo(seqNo int) *Instance {
 // Prepare will be called in Propose function
 func (px *Paxos) Prepare(args *prepareArguments, response *prepareReply) error {
 	// GetNodeInfo will return the instance from seq number
-	pxInstance := px.getNodeInfo(args.seqNo)
-	if pxInstance != nil && args.proposalNo > pxInstance.highestPrepare {
-		pxInstance.highestPrepare = args.proposalNo
-		response.ok = true
-		response.proposalNo = pxInstance.highestAccept
-		response.value = pxInstance.acceptedValue
+	pxInstance := px.getNodeInfo(args.SeqNo)
+	if pxInstance != nil && args.ProposalNo > pxInstance.HighestPrepare {
+		pxInstance.HighestPrepare = args.ProposalNo
+		response.Ok = true
+		response.ProposalNo = pxInstance.HighestAccept
+		response.Value = pxInstance.AcceptedValue
 	} else {
-		response.ok = false
+		response.Ok = false
 	}
-	return nil	
-	
+	return nil
+}
 
 func (px *Paxos) Accept(args *acceptArguments, acceptReply *acceptReply) {
 
-	pxInstance := px.getNodeInfo(args.seqNo)
-	if pxInstance != nil && args.proposalNo >= pxInstance.highestPrepare {
-		pxInstance.highestPrepare = args.proposalNo
-		pxInstance.acceptedValue = args.value
-		pxInstance.highestAccept = args.proposalNo
-		acceptReply.ok = true
-		acceptReply.proposalNo = args.proposalNum
+	pxInstance := px.getNodeInfo(args.SeqNo)
+	if pxInstance != nil && args.ProposalNo >= pxInstance.HighestPrepare {
+		pxInstance.HighestPrepare = args.ProposalNo
+		pxInstance.AcceptedValue = args.Value
+		pxInstance.HighestAccept = args.ProposalNo
+		acceptReply.Ok = true
+		acceptReply.ProposalNo = args.ProposalNo
 	} else {
-		acceptReply.ok = false
-		acceptReply.proposalNo = args.proposalNo
+		acceptReply.Ok = false
+		acceptReply.ProposalNo = args.ProposalNo
 	}
-	return 
+	return
 }
 
-//
 // the application on this machine is done with
 // all instances <= seq.
 //
@@ -434,7 +426,7 @@ func (px *Paxos) Status(seq int) (Fate, interface{}) {
 	if !instanceExists {
 		return 0, nil
 	} else {
-		return px.instances[seq].fate, pxInstance.acceptedValue
+		return px.instances[seq].fate, pxInstance.AcceptedValue
 	}
 
 	return Pending, nil
