@@ -21,18 +21,18 @@ package paxos
 //
 
 import (
+	"fmt"
+	"log"
+	"math"
+	"math/rand"
 	"net"
+	"net/rpc"
+	"os"
+	"sync"
+	"sync/atomic"
+	"syscall"
+	"time"
 )
-import "net/rpc"
-import "log"
-
-import "os"
-import "syscall"
-import "sync"
-import "sync/atomic"
-import "fmt"
-import "math/rand"
-import "time"
 
 // px.Status() return values, indicating
 // whether an agreement has been decided,
@@ -179,7 +179,7 @@ func (px *Paxos) proposeValue(seqNo int, v interface{}) {
 	}
 	for px.dead == 0 && curr.fate == Pending && seqNo > px.minimumSeqNo[px.me] {
 		ts := time.Now().UnixNano()
-		ts = ts*int64(len(px.peers)) + int64(px.me)
+		ts = int64(math.Abs(float64(ts*int64(len(px.peers)) + int64(px.me))))
 		// Send prepare requests to every peer
 		proposedResponse := make(chan PrepareReply)
 		i := 0
