@@ -32,7 +32,6 @@ import "sync"
 import "sync/atomic"
 import "fmt"
 import "math/rand"
-import "math"
 import "time"
 
 // px.Status() return values, indicating
@@ -170,7 +169,6 @@ func (px *Paxos) Start(seq int, v interface{}) {
 
 func (px *Paxos) proposeValue(seqNo int, v interface{}) {
 	px.concurrencyMutex.Lock()
-	defer px.concurrencyMutex.Unlock()
 
 	px.mu.Lock()
 	curr := px.getNodeInfo(seqNo)
@@ -300,6 +298,7 @@ func (px *Paxos) proposeValue(seqNo int, v interface{}) {
 			k++
 		}
 	}
+	defer px.concurrencyMutex.Unlock()
 }
 
 func (px *Paxos) getNodeInfo(seqNo int) *Instance {
@@ -321,7 +320,6 @@ func (px *Paxos) getNodeInfo(seqNo int) *Instance {
 func (px *Paxos) Prepare(args *PrepareArguments, response *PrepareReply) error {
 	// GetNodeInfo will return the instance from seq number
 	px.mu.Lock()
-	defer px.mu.Unlock()
 
 	ins := px.getNodeInfo(args.SeqNo)
 	if ins != nil && args.ProposalNo > ins.HighestPrepare {
@@ -333,13 +331,12 @@ func (px *Paxos) Prepare(args *PrepareArguments, response *PrepareReply) error {
 	} else {
 		response.Ok = false
 	}
-
+	defer px.mu.Unlock()
 	return nil
 }
 
 func (px *Paxos) Accept(args *AcceptArguments, acceptReply *AcceptReply) error {
 	px.mu.Lock()
-	defer px.mu.Unlock()
 
 	pxInstance := px.getNodeInfo(args.SeqNo)
 	if pxInstance != nil && args.ProposalNo >= pxInstance.HighestPrepare {
@@ -352,12 +349,12 @@ func (px *Paxos) Accept(args *AcceptArguments, acceptReply *AcceptReply) error {
 		acceptReply.Ok = false
 		acceptReply.ProposalNo = args.ProposalNo
 	}
+	defer px.mu.Unlock()
 	return nil
 }
 
 func (px *Paxos) Decide(args *DecidedArguments, reply *DecidedReply) error {
 	px.mu.Lock()
-	defer px.mu.Unlock()
 
 	ins := px.getNodeInfo(args.SeqNo)
 	if ins != nil {
@@ -366,14 +363,16 @@ func (px *Paxos) Decide(args *DecidedArguments, reply *DecidedReply) error {
 	}
 	px.minimumSeqNo[args.Me] = args.DoneSequences
 	px.Forget()
+
+	defer px.mu.Unlock()
 	return nil
 }
 
 func (px *Paxos) Forget() {
 	min := px.Min()
-	for k, _ := range px.instances {
-		if k < min {
-			delete(px.instances, k)
+	for i, _ := range px.instances {
+		if i < min {
+			delete(px.instances, i)
 		}
 	}
 }
@@ -391,7 +390,7 @@ func (px *Paxos) Done(seq int) {
 
 // the application wants to know the
 // highest instance sequence known to
-// this peer.
+// this peer.2
 func (px *Paxos) Max() int {
 
 	return px.maximumSeqNo
@@ -424,15 +423,12 @@ func (px *Paxos) Max() int {
 // missed -- the other peers therefor cannot forget these
 // instances.
 func (px *Paxos) Min() int {
-	// let min be some maximum value so it can be compared to the minimum of all the minseq
-	min := math.MaxInt32
-	i := 0
-	// Check minimumSeqNo for all proposers
-	for i < len(px.minimumSeqNo) {
+
+	min := 1<<15 - 1
+	for i := range px.minimumSeqNo {
 		if min > px.minimumSeqNo[i] {
 			min = px.minimumSeqNo[i]
 		}
-		i++
 	}
 	return min + 1
 }
@@ -451,7 +447,7 @@ func (px *Paxos) Status(seq int) (Fate, interface{}) {
 
 	ins, ok := px.instances[seq]
 	if !ok {
-		return 0, nil
+		return Forgotten, nil
 	} else {
 
 		return px.instances[seq].fate, ins.AcceptedValue
