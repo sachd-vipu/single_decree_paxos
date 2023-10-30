@@ -384,7 +384,12 @@ func (px *Paxos) Forget() {
 func (px *Paxos) Done(seq int) {
 	// Set min seq no for proposer to seq
 	// this value will be used later in Min() function
-	px.minimumSeqNo[px.me] = seq
+	px.mu.Lock()
+	defer px.mu.Unlock()
+	if seq > px.minimumSeqNo[px.me] {
+		px.minimumSeqNo[px.me] = seq
+		px.Forget()
+	}
 
 }
 
@@ -441,7 +446,6 @@ func (px *Paxos) Min() int {
 func (px *Paxos) Status(seq int) (Fate, interface{}) {
 	// Your code here.
 
-	// if seq is less than min, return forgotten
 	px.mu.Lock()
 	defer px.mu.Unlock()
 
