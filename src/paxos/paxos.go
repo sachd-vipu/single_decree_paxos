@@ -155,6 +155,9 @@ func call(srv string, name string, args interface{}, reply interface{}) bool {
 // is reached.
 func (px *Paxos) Start(seq int, v interface{}) {
 	// Your code here.
+	if seq < px.Min() {
+		return
+	}
 	if px.maximumSeqNo < seq {
 		px.maximumSeqNo = seq
 	} else if px.minimumSeqNo[px.me] > seq {
@@ -450,6 +453,10 @@ func (px *Paxos) Status(seq int) (Fate, interface{}) {
 	defer px.mu.Unlock()
 
 	ins, ok := px.instances[seq]
+	if seq < px.Min() {
+		return Forgotten, nil
+	}
+
 	if !ok {
 		return Pending, nil
 	} else {
