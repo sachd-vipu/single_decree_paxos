@@ -183,44 +183,18 @@ func (px *Paxos) proposeValue(seqNo int, v interface{}) {
 		return
 	}
 	for px.dead == 0 && curr.fate == Pending && seqNo > px.minimumSeqNo[px.me] {
-		timeStamp := time.Now().UnixNano()
-		timeStamp = int64(math.Abs(float64(timeStamp*int64(len(px.peers)) + int64(px.me))))
+		proposalNum := time.Now().UnixNano()
+		proposalNum = int64(math.Abs(float64(proposalNum*int64(len(px.peers)) + int64(px.me))))
 
-		// Send prepare requests with current timestamp to all peer
+		// Send prepare requests with current proposalNum to all peer
 		proposedResponse := make(chan PrepareReply)
-		sendPrepareRequests(px, proposedResponse, timeStamp, seqNo)
+		sendPrepareRequests(px, proposedResponse, proposalNum, seqNo)
 
 		// collect responses from prepareRequests and check majority
-		delayNum := 0
-		done := false
-		respNum := 0
-		minval := v
-		var maxts int64
-		maxts = 0
 
-		majority := len(px.peers) / 2
-		for !done {
-			select {
-			case reply := <-proposedResponse:
-				if reply.Ok {
-					respNum++
-					if reply.ProposalNo > maxts && reply.Value != nil {
-						maxts = reply.ProposalNo
-						minval = reply.Value
-					}
-					if respNum > majority {
-						done = true
-					}
-				}
-			default:
-				time.Sleep(delayBetweenInterval)
-				delayNum++
-				if delayNum >= maxDelayAllowed {
-					done = true
-				}
-			}
-		}
-		if respNum <= majority {
+		minval := v
+		isMajority, minval := px.ProcessPrepareReply(proposedResponse, v)
+		if !isMajority {
 			ms := rand.Int31() % 1000
 			time.Sleep(time.Duration(ms) * time.Millisecond)
 			continue
@@ -228,34 +202,16 @@ func (px *Paxos) proposeValue(seqNo int, v interface{}) {
 
 		// more than majority OK's received from prepare, now send accept requests to all node
 		acceptResponses := make(chan AcceptReply)
-		sendAccept(px, acceptResponses, timeStamp, seqNo, minval)
+		sendAccept(px, acceptResponses, proposalNum, seqNo, minval)
 
 		// collect responses from accept requests and check majority
-		respNum = 0
-		delayNum = 0
-		done = false
+		isMajority = px.ProcessAcceptReply(acceptResponses, proposalNum)
 
-		for !done {
-			select {
-			case reply := <-acceptResponses:
-				if reply.Ok && reply.ProposalNo == timeStamp {
-					respNum++
-					if respNum > majority {
-						done = true
-					}
-				}
-			default:
-				time.Sleep(delayBetweenInterval)
-				delayNum++
-				if delayNum >= maxDelayAllowed {
-					done = true
-				}
-			}
-		}
-		if respNum <= majority {
+		if !isMajority {
 			time.Sleep(time.Duration(rand.Int31()%1000) * time.Millisecond)
 			continue
 		}
+
 		// as proposalNo accepted by majority, send decide to all nodes
 		sendDecide(px, seqNo, minval)
 
@@ -264,10 +220,10 @@ func (px *Paxos) proposeValue(seqNo int, v interface{}) {
 	defer px.concurrencyMutex.Unlock()
 }
 
-func sendPrepareRequests(px *Paxos, proposedResponse chan<- PrepareReply, timeStamp int64, seqNo int) {
+func sendPrepareRequests(px *Paxos, proposedResponse chan<- PrepareReply, proposalNum int64, seqNo int) {
 	i := 0
 	for i < len(px.peers) {
-		args := PrepareArguments{seqNo, timeStamp}
+		args := PrepareArguments{seqNo, proposalNum}
 		reply := PrepareReply{false, -2, nil}
 		go func(pid int) {
 			if pid == px.me {
@@ -284,10 +240,48 @@ func sendPrepareRequests(px *Paxos, proposedResponse chan<- PrepareReply, timeSt
 	}
 }
 
-func sendAccept(px *Paxos, acceptResponses chan<- AcceptReply, timeStamp int64, seqNo int, minval interface{}) {
+func (px *Paxos) ProcessPrepareReply(proposedResponse <-chan PrepareReply, v interface{}) (bool, interface{}) {
+
+	delayNum := 0
+	done := false
+	respNum := 0
+	minval := v
+	var maxProposalNum int64
+	maxProposalNum = 0
+
+	majority := len(px.peers) / 2
+	for !done {
+		select {
+		case reply := <-proposedResponse:
+			if reply.Ok {
+				respNum++
+				if reply.ProposalNo > maxProposalNum && reply.Value != nil {
+					maxProposalNum = reply.ProposalNo
+					minval = reply.Value
+				}
+				if respNum > majority {
+					done = true
+				}
+			}
+		default:
+			time.Sleep(delayBetweenInterval)
+			delayNum++
+			if delayNum >= maxDelayAllowed {
+				done = true
+			}
+		}
+	}
+	if respNum <= majority {
+		return false, nil
+	}
+	return true, minval
+
+}
+
+func sendAccept(px *Paxos, acceptResponses chan<- AcceptReply, proposalNum int64, seqNo int, minval interface{}) {
 	j := 0
 	for j < len(px.peers) {
-		args := AcceptArguments{seqNo, timeStamp, minval}
+		args := AcceptArguments{seqNo, proposalNum, minval}
 		var reply AcceptReply
 		go func(pid int) {
 			if pid == px.me {
@@ -300,6 +294,36 @@ func sendAccept(px *Paxos, acceptResponses chan<- AcceptReply, timeStamp int64, 
 
 		j++
 	}
+}
+
+func (px *Paxos) ProcessAcceptReply(acceptResponses <-chan AcceptReply, proposalNum int64) bool {
+
+	respNum := 0
+	delayNum := 0
+	done := false
+	majority := len(px.peers) / 2
+
+	for !done {
+		select {
+		case reply := <-acceptResponses:
+			if reply.Ok && reply.ProposalNo == proposalNum {
+				respNum++
+				if respNum > majority {
+					done = true
+				}
+			}
+		default:
+			time.Sleep(delayBetweenInterval)
+			delayNum++
+			if delayNum >= maxDelayAllowed {
+				done = true
+			}
+		}
+	}
+	if respNum <= majority {
+		return false
+	}
+	return true
 }
 
 func sendDecide(px *Paxos, seqNo int, minval interface{}) {
