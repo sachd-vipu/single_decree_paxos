@@ -424,7 +424,7 @@ func (px *Paxos) Max() int {
 // instances.
 func (px *Paxos) Min() int {
 
-	min := 1<<15 - 1
+	min := math.MaxInt32
 	for i := range px.minimumSeqNo {
 		if min > px.minimumSeqNo[i] {
 			min = px.minimumSeqNo[i]
@@ -447,7 +447,7 @@ func (px *Paxos) Status(seq int) (Fate, interface{}) {
 
 	ins, ok := px.instances[seq]
 	if !ok {
-		return Forgotten, nil
+		return Pending, nil
 	} else {
 
 		return px.instances[seq].fate, ins.AcceptedValue
