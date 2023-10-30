@@ -168,11 +168,11 @@ func (px *Paxos) Start(seq int, v interface{}) {
 	}
 	go func() {
 		// to be implemented by Ayush
-		px.proposeValue(seq, v)
+		px.beginConsensusWorkflow(seq, v)
 	}()
 }
 
-func (px *Paxos) proposeValue(seqNo int, v interface{}) {
+func (px *Paxos) beginConsensusWorkflow(seqNo int, v interface{}) {
 	px.concurrencyMutex.Lock()
 
 	px.mu.Lock()
@@ -185,28 +185,25 @@ func (px *Paxos) proposeValue(seqNo int, v interface{}) {
 	for px.dead == 0 && curr.fate == Pending && seqNo > px.minimumSeqNo[px.me] {
 		proposalNum := time.Now().UnixNano()
 		proposalNum = int64(math.Abs(float64(proposalNum*int64(len(px.peers)) + int64(px.me))))
+		minval := v
 
+		// Prepare phase
 		// Send prepare requests with current proposalNum to all peer
 		proposedResponse := make(chan PrepareReply)
 		sendPrepareRequests(px, proposedResponse, proposalNum, seqNo)
-
 		// collect responses from prepareRequests and check majority
-
-		minval := v
 		isMajority, minval := px.ProcessPrepareReply(proposedResponse, v)
 		if !isMajority {
-			ms := rand.Int31() % 1000
-			time.Sleep(time.Duration(ms) * time.Millisecond)
+			time.Sleep(time.Duration(rand.Int31()%1000) * time.Millisecond)
 			continue
 		}
 
+		// Accept phase
 		// more than majority OK's received from prepare, now send accept requests to all node
 		acceptResponses := make(chan AcceptReply)
 		sendAccept(px, acceptResponses, proposalNum, seqNo, minval)
-
 		// collect responses from accept requests and check majority
 		isMajority = px.ProcessAcceptReply(acceptResponses, proposalNum)
-
 		if !isMajority {
 			time.Sleep(time.Duration(rand.Int31()%1000) * time.Millisecond)
 			continue
@@ -361,7 +358,7 @@ func (px *Paxos) getNodeInfo(seqNo int) *Instance {
 	return px.instances[seqNo]
 }
 
-// Prepare will be called in Propose function
+// Prepare will be called in sendPrepareRequests function
 func (px *Paxos) Prepare(args *PrepareArguments, response *PrepareReply) error {
 	// GetNodeInfo will return the instance from seq number
 	px.mu.Lock()
