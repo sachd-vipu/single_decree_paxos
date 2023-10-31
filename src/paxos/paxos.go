@@ -108,6 +108,7 @@ type Paxos struct {
 }
 
 func (ins *Instance) setInstance() {
+	// Initialize instance
 	ins.fate = Pending
 	ins.AcceptedValue = nil
 	ins.HighestAccept = 0
@@ -156,6 +157,7 @@ func call(srv string, name string, args interface{}, reply interface{}) bool {
 func (px *Paxos) Start(seq int, v interface{}) {
 	// Your code here.
 	fate, _ := px.Status(seq)
+	// if trying to start instance which is already decided then return
 	if fate == Forgotten {
 		return
 	}
@@ -220,13 +222,16 @@ func (px *Paxos) beginConsensusWorkflow(seqNo int, v interface{}) {
 func sendPrepareRequests(px *Paxos, proposedResponse chan<- PrepareReply, proposalNum int64, seqNo int) {
 	i := 0
 	for i < len(px.peers) {
+		// send prepare to all nodes
 		args := PrepareArguments{seqNo, proposalNum}
 		reply := PrepareReply{false, -2, nil}
 		go func(pid int) {
 			if pid == px.me {
+				// if proposer is same as peer then call prepare directly
 				px.Prepare(&args, &reply)
 				proposedResponse <- reply
 			} else {
+				// else call prepare on peers
 				ok := call(px.peers[pid], "Paxos.Prepare", &args, &reply)
 				if ok {
 					proposedResponse <- reply
@@ -238,19 +243,20 @@ func sendPrepareRequests(px *Paxos, proposedResponse chan<- PrepareReply, propos
 }
 
 func (px *Paxos) ProcessPrepareReply(proposedResponse <-chan PrepareReply, v interface{}) (bool, interface{}) {
-
+	// set delay Num, done response Num, min's value, max proposal no
 	delayNum := 0
 	done := false
 	respNum := 0
 	minval := v
 	var maxProposalNum int64
 	maxProposalNum = 0
-
+	// check if majority of prepare ok's received
 	majority := len(px.peers) / 2
 	for !done {
 		select {
 		case reply := <-proposedResponse:
 			if reply.Ok {
+				// if prepare ok received from majority then set done to true
 				respNum++
 				if reply.ProposalNo > maxProposalNum && reply.Value != nil {
 					maxProposalNum = reply.ProposalNo
@@ -261,6 +267,7 @@ func (px *Paxos) ProcessPrepareReply(proposedResponse <-chan PrepareReply, v int
 				}
 			}
 		default:
+			// if no response received then wait for some time and then check again
 			time.Sleep(delayBetweenInterval)
 			delayNum++
 			if delayNum >= maxDelayAllowed {
@@ -277,9 +284,11 @@ func (px *Paxos) ProcessPrepareReply(proposedResponse <-chan PrepareReply, v int
 
 func sendAccept(px *Paxos, acceptResponses chan<- AcceptReply, proposalNum int64, seqNo int, minval interface{}) {
 	j := 0
+	// send accept to all nodes
 	for j < len(px.peers) {
 		args := AcceptArguments{seqNo, proposalNum, minval}
 		var reply AcceptReply
+		// if proposer is same as peer then call accept directly
 		go func(pid int) {
 			if pid == px.me {
 				px.Accept(&args, &reply)
@@ -300,9 +309,11 @@ func (px *Paxos) ProcessAcceptReply(acceptResponses <-chan AcceptReply, proposal
 	done := false
 	majority := len(px.peers) / 2
 
+	// check if majority of accept ok's received
 	for !done {
 		select {
 		case reply := <-acceptResponses:
+			// if accept ok received from majority then set done to true
 			if reply.Ok && reply.ProposalNo == proposalNum {
 				respNum++
 				if respNum > majority {
@@ -310,6 +321,7 @@ func (px *Paxos) ProcessAcceptReply(acceptResponses <-chan AcceptReply, proposal
 				}
 			}
 		default:
+			// if no response received then sleep for some time and then check again
 			time.Sleep(delayBetweenInterval)
 			delayNum++
 			if delayNum >= maxDelayAllowed {
@@ -325,12 +337,15 @@ func (px *Paxos) ProcessAcceptReply(acceptResponses <-chan AcceptReply, proposal
 
 func sendDecide(px *Paxos, seqNo int, minval interface{}) {
 	k := 0
+	// send decide to all nodes
 	for k < len(px.peers) {
 		args := DecidedArguments{seqNo, minval, px.me, px.minimumSeqNo[px.me]}
 		var reply DecidedReply
+		// if proposer is same as peer then call decide directly
 		if k == px.me {
 			px.Decide(&args, &reply)
 		} else {
+			// else call decide on peers
 			go func(pid int) {
 				if pid == px.me {
 					px.Decide(&args, &reply)
@@ -363,6 +378,7 @@ func (px *Paxos) Prepare(args *PrepareArguments, response *PrepareReply) error {
 	// GetNodeInfo will return the instance from seq number
 	px.mu.Lock()
 
+	// get instance from seq no and set highest prepare to proposal no
 	ins := px.getNodeInfo(args.SeqNo)
 	if ins != nil && args.ProposalNo > ins.HighestPrepare {
 		ins.HighestPrepare = args.ProposalNo
@@ -380,14 +396,17 @@ func (px *Paxos) Prepare(args *PrepareArguments, response *PrepareReply) error {
 func (px *Paxos) Accept(args *AcceptArguments, acceptReply *AcceptReply) error {
 	px.mu.Lock()
 
+	// get instance from seq no and set highest prepare to proposal no
 	pxInstance := px.getNodeInfo(args.SeqNo)
 	if pxInstance != nil && args.ProposalNo >= pxInstance.HighestPrepare {
+		// set highest prepare to proposal no
 		pxInstance.HighestPrepare = args.ProposalNo
 		pxInstance.AcceptedValue = args.Value
 		pxInstance.HighestAccept = args.ProposalNo
 		acceptReply.Ok = true
 		acceptReply.ProposalNo = args.ProposalNo
 	} else {
+		// if proposal no is less than highest prepare then set ok to false
 		acceptReply.Ok = false
 		acceptReply.ProposalNo = args.ProposalNo
 	}
@@ -398,12 +417,15 @@ func (px *Paxos) Accept(args *AcceptArguments, acceptReply *AcceptReply) error {
 func (px *Paxos) Decide(args *DecidedArguments, reply *DecidedReply) error {
 	px.mu.Lock()
 
+	// get instance from seq no and set fate to decided
 	ins := px.getNodeInfo(args.SeqNo)
 	if ins != nil {
 		ins.fate = Decided
 		ins.AcceptedValue = args.Value
 	}
 	px.minimumSeqNo[args.Me] = args.DoneSequences
+
+	// call forget to free up memory
 	px.Forget()
 
 	defer px.mu.Unlock()
@@ -412,6 +434,7 @@ func (px *Paxos) Decide(args *DecidedArguments, reply *DecidedReply) error {
 
 func (px *Paxos) Forget() {
 	min := px.Min()
+	// forget all instances less than min seq no
 	for i, _ := range px.instances {
 		if i < min {
 			delete(px.instances, i)
@@ -430,6 +453,7 @@ func (px *Paxos) Done(seq int) {
 	defer px.mu.Unlock()
 	if seq > px.minimumSeqNo[px.me] {
 		px.minimumSeqNo[px.me] = seq
+		// call forget to free up memory
 		px.Forget()
 	}
 
@@ -439,7 +463,6 @@ func (px *Paxos) Done(seq int) {
 // highest instance sequence known to
 // this peer.2
 func (px *Paxos) Max() int {
-
 	return px.maximumSeqNo
 }
 
@@ -472,6 +495,7 @@ func (px *Paxos) Max() int {
 func (px *Paxos) Min() int {
 
 	min := math.MaxInt32
+	// find min seq no from all proposers
 	for i := range px.minimumSeqNo {
 		if min > px.minimumSeqNo[i] {
 			min = px.minimumSeqNo[i]
@@ -490,10 +514,13 @@ func (px *Paxos) Status(seq int) (Fate, interface{}) {
 
 	px.mu.Lock()
 	defer px.mu.Unlock()
+
+	// if seq is less than min seq no then we marked it as forgotten
 	if seq < px.Min() {
 		return Forgotten, nil
 	}
 	ins, ok := px.instances[seq]
+	// if seq is not present in instances then it is pending
 	if !ok {
 		return Pending, nil
 	} else {
@@ -544,7 +571,7 @@ func Make(peers []string, me int, rpcs *rpc.Server) *Paxos {
 	px.maximumSeqNo = 0
 	px.minimumSeqNo = make([]int, len(peers))
 
-	// set min seq no to 01 for all proposers
+	// set min seq no to -1 for all proposers
 	i := 0
 	for i < len(px.minimumSeqNo) {
 		px.minimumSeqNo[i] = -1
